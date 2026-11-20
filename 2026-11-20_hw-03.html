@@ -1729,6 +1729,7 @@ border-radius: 0px;
 </div>
 
 
+<p><a href="https://github.com/ChrisW12372/2026-11-20_p8108_hw-03.git" class="uri">https://github.com/ChrisW12372/2026-11-20_p8108_hw-03.git</a></p>
 <pre class="r"><code>library(tidyverse)
 library(kableExtra)
 library(survival)
@@ -2083,6 +2084,300 @@ among the models considered.</p>
 <p>M1 and M2 are nonnested. M1 uses <span class="math inline">\(x=\mathrm{CD4}/50\)</span>, while M2 uses <span class="math inline">\(\sqrt{x}\)</span>, and no coefficient restriction
 reduces either model to the other. The nested-model likelihood-ratio
 test therefore does not apply. AIC favors M1 over M2 by 5.56 points.</p>
+</div>
+<div id="part-c" class="section level2" number="1.3">
+<h2><span class="header-section-number">1.3</span> part c</h2>
+<pre class="r"><code># Hold treatment and Karnofsky score fixed at both CD4 values.
+cd4_pair &lt;- data.frame(
+  x = c(25, 125) / 50,
+  trt = c(0, 0),
+  k100 = c(1, 1)
+)
+
+cd4_models &lt;- list(M1 = m1, M4 = m4)
+
+cd4_hr &lt;- vapply(cd4_models, function(fit) {
+  lp &lt;- predict(fit, newdata = cd4_pair, type = &quot;lp&quot;)
+  exp(lp[1] - lp[2])
+}, numeric(1))</code></pre>
+<pre class="r"><code>cd4_hr_table &lt;- data.frame(
+  Model = names(cd4_models),
+  `CD4 form` = c(&quot;Linear&quot;, &quot;Linear and quadratic&quot;),
+  `Hazard ratio` = unname(cd4_hr),
+  check.names = FALSE
+)
+
+cd4_hr_table |&gt;
+  kableExtra::kbl(
+    caption = &quot;Hazard ratios comparing CD4 of 25 with CD4 of 125&quot;,
+    align = c(&quot;l&quot;, &quot;l&quot;, &quot;r&quot;),
+    digits = 3,
+    booktabs = TRUE
+  ) |&gt;
+  kableExtra::kable_styling(full_width = FALSE)</code></pre>
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>
+Hazard ratios comparing CD4 of 25 with CD4 of 125
+</caption>
+<thead>
+<tr>
+<th style="text-align:left;">
+Model
+</th>
+<th style="text-align:left;">
+CD4 form
+</th>
+<th style="text-align:right;">
+Hazard ratio
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+M1
+</td>
+<td style="text-align:left;">
+Linear
+</td>
+<td style="text-align:right;">
+4.700
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+M4
+</td>
+<td style="text-align:left;">
+Linear and quadratic
+</td>
+<td style="text-align:right;">
+4.702
+</td>
+</tr>
+</tbody>
+</table>
+<p>At the same treatment assignment and baseline Karnofsky score,
+participants with a CD4 count of 25 had an estimated hazard of an
+AIDS-defining diagnosis or death about 4.7 times that of participants
+with a CD4 count of 125. The estimates were nearly identical under M1
+(HR = 4.700) and M4 (HR = 4.702).</p>
+<p>I would choose M1. It had the lowest AIC (1240.09), and adding a
+quadratic term in M4 barely improved the fit (likelihood-ratio test,
+<span class="math inline">\(p = 0.971\)</span>). One limitation is that
+this contrast uses only two CD4 values. Agreement at these values leaves
+open the possibility that the models differ elsewhere in the CD4
+range.</p>
+<p>The closest challenge to my initial preference for a linear CD4 term
+was that M4’s AIC was only 2.00 points higher than M1’s. The nearly
+identical hazard ratios and the small gain in fit favor keeping M1. This
+comparison addresses quadratic curvature. The spline-based criterion
+specified in part (a) remains unevaluated.</p>
+</div>
+<div id="part-d" class="section level2" number="1.4">
+<h2><span class="header-section-number">1.4</span> part d</h2>
+<pre class="r"><code>m_int &lt;- survival::coxph(
+  survival::Surv(months, event) ~ trt * k100 + x,
+  data = dat_b,
+  ties = &quot;efron&quot;
+)
+
+# Test whether the treatment HR differs by Karnofsky group.
+lr_stat &lt;- 2 * as.numeric(logLik(m_int) - logLik(m1))
+lr_p &lt;- pchisq(lr_stat, df = 1, lower.tail = FALSE)
+
+interaction_test &lt;- data.frame(
+  Comparison = &quot;M1 vs. M1 with treatment interaction&quot;,
+  `LR statistic` = lr_stat,
+  df = 1,
+  `p-value` = format.pval(lr_p, digits = 3, eps = 0.001),
+  check.names = FALSE
+)
+
+interaction_test |&gt;
+  kableExtra::kbl(
+    caption = &quot;Likelihood ratio test for the treatment by Karnofsky interaction&quot;,
+    digits = 3,
+    booktabs = TRUE
+  ) |&gt;
+  kableExtra::kable_styling(full_width = FALSE)</code></pre>
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>
+Likelihood ratio test for the treatment by Karnofsky interaction
+</caption>
+<thead>
+<tr>
+<th style="text-align:left;">
+Comparison
+</th>
+<th style="text-align:right;">
+LR statistic
+</th>
+<th style="text-align:right;">
+df
+</th>
+<th style="text-align:left;">
+p-value
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+M1 vs. M1 with treatment interaction
+</td>
+<td style="text-align:right;">
+0.219
+</td>
+<td style="text-align:right;">
+1
+</td>
+<td style="text-align:left;">
+0.64
+</td>
+</tr>
+</tbody>
+</table>
+<pre class="r"><code># k100 = 0: beta_trt
+# k100 = 1: beta_trt + beta_interaction
+terms &lt;- c(&quot;trt&quot;, &quot;trt:k100&quot;)
+b &lt;- coef(m_int)[terms]
+V &lt;- vcov(m_int)[terms, terms]
+
+C &lt;- rbind(
+  c(1, 0),  # Karnofsky &lt; 100
+  c(1, 1)   # Karnofsky = 100
+)
+
+group_log_hr &lt;- drop(C %*% b)
+group_se &lt;- sqrt(diag(C %*% V %*% t(C)))
+
+log_hr &lt;- c(coef(m0)[&quot;trt&quot;], coef(m1)[&quot;trt&quot;], group_log_hr)
+se &lt;- c(
+  sqrt(vcov(m0)[&quot;trt&quot;, &quot;trt&quot;]),
+  sqrt(vcov(m1)[&quot;trt&quot;, &quot;trt&quot;]),
+  group_se
+)
+z &lt;- qnorm(0.975)
+
+treatment_hr_table &lt;- data.frame(
+  Model = c(&quot;M0&quot;, &quot;M1&quot;, &quot;Interaction model&quot;, &quot;Interaction model&quot;),
+  Estimate = c(
+    &quot;Unadjusted&quot;,
+    &quot;Adjusted common HR&quot;,
+    &quot;Karnofsky &lt; 100&quot;,
+    &quot;Karnofsky = 100&quot;
+  ),
+  HR = exp(log_hr),
+  `95% CI` = sprintf(
+    &quot;%.3f to %.3f&quot;,
+    exp(log_hr - z * se),
+    exp(log_hr + z * se)
+  ),
+  check.names = FALSE
+)
+
+treatment_hr_table |&gt;
+  kableExtra::kbl(
+    caption = &quot;Treatment hazard ratios for IDV versus no IDV&quot;,
+    align = c(&quot;l&quot;, &quot;l&quot;, &quot;r&quot;, &quot;c&quot;),
+    digits = 3,
+    booktabs = TRUE
+  ) |&gt;
+  kableExtra::kable_styling(full_width = FALSE)</code></pre>
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>
+Treatment hazard ratios for IDV versus no IDV
+</caption>
+<thead>
+<tr>
+<th style="text-align:left;">
+Model
+</th>
+<th style="text-align:left;">
+Estimate
+</th>
+<th style="text-align:right;">
+HR
+</th>
+<th style="text-align:center;">
+95% CI
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+M0
+</td>
+<td style="text-align:left;">
+Unadjusted
+</td>
+<td style="text-align:right;">
+0.504
+</td>
+<td style="text-align:center;">
+0.331 to 0.769
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+M1
+</td>
+<td style="text-align:left;">
+Adjusted common HR
+</td>
+<td style="text-align:right;">
+0.508
+</td>
+<td style="text-align:center;">
+0.333 to 0.774
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Interaction model
+</td>
+<td style="text-align:left;">
+Karnofsky &lt; 100
+</td>
+<td style="text-align:right;">
+0.485
+</td>
+<td style="text-align:center;">
+0.305 to 0.773
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Interaction model
+</td>
+<td style="text-align:left;">
+Karnofsky = 100
+</td>
+<td style="text-align:right;">
+0.632
+</td>
+<td style="text-align:center;">
+0.234 to 1.710
+</td>
+</tr>
+</tbody>
+</table>
+<p>The likelihood-ratio test gave little evidence that the treatment
+hazard ratio varied by baseline Karnofsky score (<span class="math inline">\(\chi^2_1 = 0.219\)</span>, <span class="math inline">\(p = 0.64\)</span>). The hazard ratio for IDV
+versus no IDV was 0.485 (95% CI: 0.305 to 0.773) among participants with
+scores below 100 and 0.632 (95% CI: 0.234 to 1.710) among those with a
+score of 100. The latter group had only 17 events, compared with 79 in
+the lower-score group, and its confidence interval was much wider. Given
+the limited evidence for interaction and the imprecision in the
+score-100 group, I would report the common adjusted hazard ratio from M1
+as the primary estimate (HR = 0.508, 95% CI: 0.333 to 0.774).</p>
+<p>The unadjusted hazard ratio was 0.504, and adjustment for baseline
+CD4 and Karnofsky score changed it only slightly, to 0.508. Hazard
+ratios are noncollapsible, so adjusted and unadjusted estimates can
+differ even in a randomized trial without confounding. The observed
+difference alone cannot establish confounding.</p>
 </div>
 </div>
 

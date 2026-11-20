@@ -11,6 +11,7 @@ output:
     css: style.css
 ---
 
+https://github.com/ChrisW12372/2026-11-20_p8108_hw-03.git
 
 ```{r warning=FALSE, message=FALSE}
 library(tidyverse)
@@ -176,18 +177,165 @@ the other. The nested-model likelihood-ratio test therefore does not
 apply. AIC favors M1 over M2 by 5.56 points.
 
 
+## part c
+
+
+```{r}
+# Hold treatment and Karnofsky score fixed at both CD4 values.
+cd4_pair <- data.frame(
+  x = c(25, 125) / 50,
+  trt = c(0, 0),
+  k100 = c(1, 1)
+)
+
+cd4_models <- list(M1 = m1, M4 = m4)
+
+cd4_hr <- vapply(cd4_models, function(fit) {
+  lp <- predict(fit, newdata = cd4_pair, type = "lp")
+  exp(lp[1] - lp[2])
+}, numeric(1))
+```
+
+
+```{r}
+cd4_hr_table <- data.frame(
+  Model = names(cd4_models),
+  `CD4 form` = c("Linear", "Linear and quadratic"),
+  `Hazard ratio` = unname(cd4_hr),
+  check.names = FALSE
+)
+
+cd4_hr_table |>
+  kableExtra::kbl(
+    caption = "Hazard ratios comparing CD4 of 25 with CD4 of 125",
+    align = c("l", "l", "r"),
+    digits = 3,
+    booktabs = TRUE
+  ) |>
+  kableExtra::kable_styling(full_width = FALSE)
+```
+
+
+At the same treatment assignment and baseline Karnofsky score,
+participants with a CD4 count of 25 had an estimated hazard of an
+AIDS-defining diagnosis or death about 4.7 times that of participants
+with a CD4 count of 125. The estimates were nearly identical under
+M1 (HR = 4.700) and M4 (HR = 4.702).
+
+I would choose M1. It had the lowest AIC (1240.09), and adding a
+quadratic term in M4 barely improved the fit (likelihood-ratio test,
+\(p = 0.971\)). One limitation is that this contrast uses only two
+CD4 values. Agreement at these values leaves open the possibility
+that the models differ elsewhere in the CD4 range.
+
+The closest challenge to my initial preference for a linear CD4 term
+was that M4's AIC was only 2.00 points higher than M1's. The nearly
+identical hazard ratios and the small gain in fit favor keeping M1.
+This comparison addresses quadratic curvature. The spline-based
+criterion specified in part (a) remains unevaluated.
+
+
+## part d
+
+```{r}
+m_int <- survival::coxph(
+  survival::Surv(months, event) ~ trt * k100 + x,
+  data = dat_b,
+  ties = "efron"
+)
+
+# Test whether the treatment HR differs by Karnofsky group.
+lr_stat <- 2 * as.numeric(logLik(m_int) - logLik(m1))
+lr_p <- pchisq(lr_stat, df = 1, lower.tail = FALSE)
+
+interaction_test <- data.frame(
+  Comparison = "M1 vs. M1 with treatment interaction",
+  `LR statistic` = lr_stat,
+  df = 1,
+  `p-value` = format.pval(lr_p, digits = 3, eps = 0.001),
+  check.names = FALSE
+)
+
+interaction_test |>
+  kableExtra::kbl(
+    caption = "Likelihood ratio test for the treatment by Karnofsky interaction",
+    digits = 3,
+    booktabs = TRUE
+  ) |>
+  kableExtra::kable_styling(full_width = FALSE)
+```
 
 
 
+```{r}
+# k100 = 0: beta_trt
+# k100 = 1: beta_trt + beta_interaction
+terms <- c("trt", "trt:k100")
+b <- coef(m_int)[terms]
+V <- vcov(m_int)[terms, terms]
+
+C <- rbind(
+  c(1, 0),  # Karnofsky < 100
+  c(1, 1)   # Karnofsky = 100
+)
+
+group_log_hr <- drop(C %*% b)
+group_se <- sqrt(diag(C %*% V %*% t(C)))
+
+log_hr <- c(coef(m0)["trt"], coef(m1)["trt"], group_log_hr)
+se <- c(
+  sqrt(vcov(m0)["trt", "trt"]),
+  sqrt(vcov(m1)["trt", "trt"]),
+  group_se
+)
+z <- qnorm(0.975)
+
+treatment_hr_table <- data.frame(
+  Model = c("M0", "M1", "Interaction model", "Interaction model"),
+  Estimate = c(
+    "Unadjusted",
+    "Adjusted common HR",
+    "Karnofsky < 100",
+    "Karnofsky = 100"
+  ),
+  HR = exp(log_hr),
+  `95% CI` = sprintf(
+    "%.3f to %.3f",
+    exp(log_hr - z * se),
+    exp(log_hr + z * se)
+  ),
+  check.names = FALSE
+)
+
+treatment_hr_table |>
+  kableExtra::kbl(
+    caption = "Treatment hazard ratios for IDV versus no IDV",
+    align = c("l", "l", "r", "c"),
+    digits = 3,
+    booktabs = TRUE
+  ) |>
+  kableExtra::kable_styling(full_width = FALSE)
+```
 
 
 
+The likelihood-ratio test gave little evidence that the treatment
+hazard ratio varied by baseline Karnofsky score
+(\(\chi^2_1 = 0.219\), \(p = 0.64\)). The hazard ratio for IDV versus
+no IDV was 0.485 (95\% CI: 0.305 to 0.773) among participants with
+scores below 100 and 0.632 (95\% CI: 0.234 to 1.710) among those with
+a score of 100. The latter group had only 17 events, compared with
+79 in the lower-score group, and its confidence interval was much
+wider. Given the limited evidence for interaction and the imprecision
+in the score-100 group, I would report the common adjusted hazard
+ratio from M1 as the primary estimate (HR = 0.508, 95\% CI:
+0.333 to 0.774).
 
-
-
-
-
-
+The unadjusted hazard ratio was 0.504, and adjustment for baseline
+CD4 and Karnofsky score changed it only slightly, to 0.508.
+Hazard ratios are noncollapsible, so adjusted and unadjusted estimates
+can differ even in a randomized trial without confounding. The
+observed difference alone cannot establish confounding.
 
 
 
