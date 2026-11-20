@@ -2380,6 +2380,360 @@ differ even in a randomized trial without confounding. The observed
 difference alone cannot establish confounding.</p>
 </div>
 </div>
+<div id="problem-2" class="section level1" number="2">
+<h1><span class="header-section-number">2</span> problem 2</h1>
+<div id="part-a-1" class="section level2" number="2.1">
+<h2><span class="header-section-number">2.1</span> part a</h2>
+<pre class="r"><code>times &lt;- c(6, 9)
+
+case_a &lt;- dat_b |&gt;
+  filter(cd4_group == &quot;&lt;50&quot;, k100 == 0)
+
+cox_rows &lt;- data.frame(
+  trt = c(0, 1),
+  k100 = c(0, 0),
+  cd4_group = factor(
+    rep(&quot;&lt;50&quot;, 2),
+    levels = levels(dat_b$cd4_group)
+  )
+)
+
+survival_a &lt;- lapply(seq_len(nrow(cox_rows)), function(i) {
+  profile &lt;- cox_rows[i, , drop = FALSE]
+  cell &lt;- case_a |&gt; filter(trt == profile$trt)
+
+  cox_curve &lt;- survfit(m3, newdata = profile, stype = 2, ctype = 1)
+  km_curve &lt;- survfit(Surv(months, event) ~ 1, data = cell)
+
+  n_risk &lt;- vapply(times, function(t) sum(cell$months &gt;= t), integer(1))
+  km_surv &lt;- summary(km_curve, times = times, extend = TRUE)$surv
+  km_surv[n_risk == 0] &lt;- NA_real_
+
+  tibble(
+    trt = profile$trt,
+    Treatment = c(&quot;No IDV (assigned)&quot;, &quot;IDV (paired)&quot;)[i],
+    Month = times,
+    Cox = summary(cox_curve, times = times)$surv,
+    KM = km_surv,
+    AtRisk = n_risk
+  )
+}) |&gt;
+  bind_rows()
+
+survival_a |&gt;
+  transmute(
+    Treatment,
+    Month,
+    `Cox survival (%)` = 100 * Cox,
+    `KM survival (%)` = 100 * KM,
+    `Number at risk` = AtRisk
+  ) |&gt;
+  kbl(caption = &quot;Six- and nine-month survival for Case A&quot;,
+      digits = 2, booktabs = TRUE) |&gt;
+  kable_styling(full_width = FALSE)</code></pre>
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>
+Six- and nine-month survival for Case A
+</caption>
+<thead>
+<tr>
+<th style="text-align:left;">
+Treatment
+</th>
+<th style="text-align:right;">
+Month
+</th>
+<th style="text-align:right;">
+Cox survival (%)
+</th>
+<th style="text-align:right;">
+KM survival (%)
+</th>
+<th style="text-align:right;">
+Number at risk
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+No IDV (assigned)
+</td>
+<td style="text-align:right;">
+6
+</td>
+<td style="text-align:right;">
+80.64
+</td>
+<td style="text-align:right;">
+79.46
+</td>
+<td style="text-align:right;">
+108
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+No IDV (assigned)
+</td>
+<td style="text-align:right;">
+9
+</td>
+<td style="text-align:right;">
+75.54
+</td>
+<td style="text-align:right;">
+73.90
+</td>
+<td style="text-align:right;">
+57
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+IDV (paired)
+</td>
+<td style="text-align:right;">
+6
+</td>
+<td style="text-align:right;">
+89.56
+</td>
+<td style="text-align:right;">
+89.22
+</td>
+<td style="text-align:right;">
+126
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+IDV (paired)
+</td>
+<td style="text-align:right;">
+9
+</td>
+<td style="text-align:right;">
+86.61
+</td>
+<td style="text-align:right;">
+86.56
+</td>
+<td style="text-align:right;">
+74
+</td>
+</tr>
+</tbody>
+</table>
+<pre class="r"><code>ref_row &lt;- data.frame(
+  trt = 0,
+  k100 = 0,
+  cd4_group = factor(&quot;&gt;100&quot;, levels = levels(dat_b$cd4_group))
+)
+
+assigned_row &lt;- cox_rows[1, , drop = FALSE]
+
+ref_curve &lt;- survfit(m3, newdata = ref_row, stype = 2, ctype = 1)
+s_ref_6 &lt;- summary(ref_curve, times = 6)$surv
+
+lp &lt;- predict(m3, newdata = bind_rows(ref_row, assigned_row), type = &quot;lp&quot;)
+hr_vs_ref &lt;- exp(lp[2] - lp[1])
+
+tibble(
+  `Reference survival at 6 months` = s_ref_6,
+  `Assigned vs. reference HR` = hr_vs_ref,
+  `Reconstructed survival` = s_ref_6^hr_vs_ref,
+  `Direct Cox prediction` = survival_a$Cox[
+    survival_a$trt == 0 &amp; survival_a$Month == 6
+  ]
+) |&gt;
+  kbl(caption = &quot;Reconstruction of the assigned row&#39;s six-month prediction&quot;,
+      digits = 4, booktabs = TRUE) |&gt;
+  kable_styling(full_width = FALSE)</code></pre>
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>
+Reconstruction of the assigned row’s six-month prediction
+</caption>
+<thead>
+<tr>
+<th style="text-align:right;">
+Reference survival at 6 months
+</th>
+<th style="text-align:right;">
+Assigned vs. reference HR
+</th>
+<th style="text-align:right;">
+Reconstructed survival
+</th>
+<th style="text-align:right;">
+Direct Cox prediction
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right;">
+0.9728
+</td>
+<td style="text-align:right;">
+7.7905
+</td>
+<td style="text-align:right;">
+0.8064
+</td>
+<td style="text-align:right;">
+0.8064
+</td>
+</tr>
+</tbody>
+</table>
+<pre class="r"><code>at_9 &lt;- survival_a |&gt; filter(Month == 9)
+
+difference_9 &lt;- tibble(
+  Method = c(&quot;Cox&quot;, &quot;Kaplan--Meier&quot;),
+  `IDV minus no IDV (percentage points)` = 100 * c(
+    at_9$Cox[at_9$trt == 1] - at_9$Cox[at_9$trt == 0],
+    at_9$KM[at_9$trt == 1] - at_9$KM[at_9$trt == 0]
+  )
+)
+
+difference_9 |&gt;
+  kbl(caption = &quot;Treatment differences in nine-month survival&quot;,
+      digits = 2, booktabs = TRUE) |&gt;
+  kable_styling(full_width = FALSE)</code></pre>
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>
+Treatment differences in nine-month survival
+</caption>
+<thead>
+<tr>
+<th style="text-align:left;">
+Method
+</th>
+<th style="text-align:right;">
+IDV minus no IDV (percentage points)
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+Cox
+</td>
+<td style="text-align:right;">
+11.07
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Kaplan–Meier
+</td>
+<td style="text-align:right;">
+12.66
+</td>
+</tr>
+</tbody>
+</table>
+<pre class="r"><code>follow_up_a &lt;- case_a |&gt;
+  group_by(trt) |&gt;
+  summarise(
+    `Events after month 6 through month 9` =
+      sum(event == 1 &amp; months &gt; 6 &amp; months &lt;= 9),
+    `Last observed follow-up (months)` = max(months),
+    `Number at risk at month 12` = sum(months &gt;= 12),
+    .groups = &quot;drop&quot;
+  ) |&gt;
+  mutate(Treatment = if_else(trt == 0, &quot;No IDV&quot;, &quot;IDV&quot;), .before = 1) |&gt;
+  select(-trt)
+
+follow_up_a |&gt;
+  kbl(caption = &quot;Event counts and follow-up for Case A&quot;,
+      digits = 3, booktabs = TRUE) |&gt;
+  kable_styling(full_width = FALSE)</code></pre>
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>
+Event counts and follow-up for Case A
+</caption>
+<thead>
+<tr>
+<th style="text-align:left;">
+Treatment
+</th>
+<th style="text-align:right;">
+Events after month 6 through month 9
+</th>
+<th style="text-align:right;">
+Last observed follow-up (months)
+</th>
+<th style="text-align:right;">
+Number at risk at month 12
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+No IDV
+</td>
+<td style="text-align:right;">
+7
+</td>
+<td style="text-align:right;">
+11.447
+</td>
+<td style="text-align:right;">
+0
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+IDV
+</td>
+<td style="text-align:right;">
+3
+</td>
+<td style="text-align:right;">
+11.678
+</td>
+<td style="text-align:right;">
+0
+</td>
+</tr>
+</tbody>
+</table>
+<p>For Case A (CD4 <span class="math inline">\(&lt;50\)</span> and
+Karnofsky score <span class="math inline">\(&lt;100\)</span>), the
+assigned arm was no IDV. At six months, the M3 reference profile (no
+IDV, Karnofsky score <span class="math inline">\(&lt;100\)</span>, and
+CD4 <span class="math inline">\(&gt;100\)</span>) had an estimated
+event-free survival of 0.9728. The assigned profile had a hazard 7.7905
+times that of the reference profile. Using the unrounded estimates, the
+Cox survival prediction is <span class="math display">\[
+\widehat S_{\mathrm{assigned}}(6)
+= \widehat
+S_{\mathrm{ref}}(6)^{\widehat{\mathrm{HR}}_{\mathrm{assigned/ref}}}
+= 0.8064,
+\]</span> which matches the direct prediction.</p>
+<p>At nine months, estimated event-free survival was higher with IDV by
+11.07 percentage points under Cox and 12.66 percentage points under
+Kaplan–Meier. I would report the Kaplan–Meier estimates to the editor
+(86.56% with IDV and 73.90% without IDV) because they come directly from
+the two groups and both still had participants at risk at nine months
+(74 with IDV and 57 without IDV). Only 3 events occurred in the IDV arm
+and 7 in the no-IDV arm after month 6 through month 9, so the nine-month
+difference should be interpreted with some caution.</p>
+<p>I would mark the 12-month estimates as unavailable. The last observed
+follow-up was 11.447 months without IDV and 11.678 months with IDV, and
+neither arm had anyone at risk at month 12. Carrying each curve forward
+would assign zero additional event hazard from that arm’s last observed
+follow-up to month 12. I would report the nine-month estimates and state
+that follow-up in this subgroup was insufficient to estimate one-year
+event-free survival.</p>
+</div>
+<div id="part-b-1" class="section level2" number="2.2">
+<h2><span class="header-section-number">2.2</span> part b</h2>
+</div>
+</div>
 
 
 
