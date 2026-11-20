@@ -1,0 +1,205 @@
+---
+title: "2026-11-20_hw-03"
+author: "Chris"
+date: "2026-11-20"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+    number_sections: TRUE
+    theme: cosmo
+    css: style.css
+---
+
+
+```{r warning=FALSE, message=FALSE}
+library(tidyverse)
+library(kableExtra)
+library(survival)
+
+actg320 <- read_csv("data/hw3_actg320.csv")
+```
+
+
+# problem 1
+
+
+## part a
+
+\paragraph{Pre-modeling statement (November 20, 2026).}
+I expect to use a linear term for baseline CD4, scaled per 50 cells,
+so that a 50-cell increase has the same hazard ratio at any starting
+CD4 count. The alternative is a restricted cubic spline with knots at
+the 10th, 50th, and 90th percentiles of baseline CD4. I would favor the
+spline if a likelihood ratio test for nonlinearity gave \(p < 0.05\),
+using the same participants and other covariates in both models.
+Follow-up starts at study entry and is measured in months. The event
+is the first AIDS-defining diagnosis or death, whichever occurs first.
+I assume that censoring is independent of the event time conditional
+on the model covariates. The treatment contrast compares assignment
+to combination therapy with indinavir to assignment to combination
+therapy without indinavir.
+
+```{r}
+counts <- actg320 |>
+  group_by(k100, trt) |>
+  summarise(
+    Participants = n(),
+    Events = sum(event == 1),
+    .groups = "drop"
+  ) |>
+  arrange(desc(k100), trt) |>
+  transmute(
+    Karnofsky = if_else(k100 == 1, "100", "< 100"),
+    Treatment = if_else(trt == 1, "With indinavir", "Without indinavir"),
+    Participants,
+    Events
+  )
+```
+
+
+```{r}
+counts |>
+  kbl(
+    caption = "Participants and events by treatment and baseline Karnofsky score",
+    col.names = c("Karnofsky score", "Treatment", "Participants", "Events"),
+    align = c("l", "l", "r", "r"),
+    booktabs = TRUE
+  ) |>
+  kable_styling(full_width = FALSE)
+```
+
+
+The treatment hazard ratio is expected to be least precise in the
+Karnofsky score 100 group. This group had 17 events (6 with indinavir
+and 11 without), compared with 79 events (27 with indinavir and 52
+without) in the group with scores below 100. The smaller number of
+events in both arms gives less information for estimating the
+treatment hazard ratio.
+
+
+## part b
+
+
+```{r}
+# Use the same complete cases for all five models.
+dat_b <- actg320 |>
+  filter(complete.cases(months, event, trt, k100, cd4)) |>
+  mutate(
+    x = cd4 / 50,
+    cd4_group = case_when(
+      cd4 < 50 ~ "<50",
+      cd4 <= 100 ~ "50–100",
+      TRUE ~ ">100"
+    ),
+    cd4_group = factor(cd4_group, levels = c(">100", "<50", "50–100"))
+  )
+```
+
+
+```{r}
+m0 <- coxph(Surv(months, event) ~ trt,
+            data = dat_b, ties = "efron")
+m1 <- coxph(Surv(months, event) ~ trt + k100 + x,
+            data = dat_b, ties = "efron")
+m2 <- coxph(Surv(months, event) ~ trt + k100 + sqrt(x),
+            data = dat_b, ties = "efron")
+m3 <- coxph(Surv(months, event) ~ trt + k100 + cd4_group,
+            data = dat_b, ties = "efron")
+m4 <- coxph(Surv(months, event) ~ trt + k100 + x + I(x^2),
+            data = dat_b, ties = "efron")
+```
+
+
+```{r}
+models <- list(M0 = m0, M1 = m1, M2 = m2, M3 = m3, M4 = m4)
+
+model_table <- tibble(
+  Model = names(models),
+  Coefficients = vapply(models, function(fit) length(coef(fit)), integer(1)),
+  Neg2LogLik = vapply(models, function(fit) {
+    -2 * as.numeric(logLik(fit))
+  }, numeric(1)),
+  AIC = vapply(models, AIC, numeric(1))
+) |>
+  mutate(DeltaAIC = AIC - min(AIC))
+
+model_table |>
+  kbl(
+    caption = "Comparison of Cox models",
+    col.names = c(
+      "Model", "Coefficients", "-2 log partial likelihood",
+      "AIC", "Delta AIC"
+    ),
+    digits = 2,
+    booktabs = TRUE
+  ) |>
+  kable_styling(full_width = FALSE)
+```
+
+
+
+```{r}
+# M4 adds one quadratic term to M1.
+lr_stat <- 2 * as.numeric(logLik(m4) - logLik(m1))
+
+lrt_table <- tibble(
+  Comparison = "M1 vs. M4",
+  `LR statistic` = lr_stat,
+  df = 1,
+  `p-value` = format.pval(
+    pchisq(lr_stat, df = 1, lower.tail = FALSE),
+    digits = 3,
+    eps = 0.001
+  )
+)
+
+lrt_table |>
+  kbl(
+    caption = "Likelihood ratio test for CD4 curvature",
+    digits = 3,
+    booktabs = TRUE
+  ) |>
+  kable_styling(full_width = FALSE)
+```
+
+
+M1, which adjusts for treatment and baseline Karnofsky score and models
+CD4 linearly, had the lowest AIC (1240.09). M4 had the next lowest AIC
+(\(\Delta\mathrm{AIC}=2.00\)). Adding the quadratic CD4 term produced
+almost no improvement in fit (likelihood-ratio \(\chi^2_1=0.001\),
+\(p=0.971\)). These results favor M1 among the models considered.
+
+M1 and M2 are nonnested. M1 uses \(x=\mathrm{CD4}/50\), while M2 uses
+\(\sqrt{x}\), and no coefficient restriction reduces either model to
+the other. The nested-model likelihood-ratio test therefore does not
+apply. AIC favors M1 over M2 by 5.56 points.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
