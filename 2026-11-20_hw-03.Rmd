@@ -343,6 +343,8 @@ observed difference alone cannot establish confounding.
 
 ## part a
 
+Case A
+
 ```{r}
 times <- c(6, 9)
 
@@ -493,18 +495,325 @@ insufficient to estimate one-year event-free survival.
 ## part b
 
 
+```{r}
+ph_m1 <- cox.zph(m1, transform = "km")
+
+ph_table <- as.data.frame(ph_m1$table[c("trt", "x"), , drop = FALSE])
+rownames(ph_table) <- c("Treatment", "Baseline CD4 per 50 cells")
+
+ph_table |>
+  kbl(
+    caption = "Term-specific proportional hazards tests for M1",
+    col.names = c("Chi-square", "df", "p-value"),
+    row.names = TRUE,
+    digits = 3,
+    booktabs = TRUE
+  ) |>
+  kable_styling(full_width = FALSE)
+```
 
 
 
+```{r}
+# Start with this example, then choose the window from the plots.
+window_term <- "trt"          # Use "x" to mark the CD4 plot instead.
+window_months <- c(6, 9)
+
+# Convert month boundaries to the plot's KM-transformed coordinates.
+window_km <- approx(
+  x = ph_m1$time,
+  y = ph_m1$x,
+  xout = window_months
+)$y
+
+old_par <- par(mfrow = c(1, 2))
+
+for (term in c("trt", "x")) {
+  label <- if (term == "trt") "Treatment" else "Baseline CD4 per 50 cells"
+
+  plot(ph_m1, var = term, main = label, xlab = "Follow-up (months)")
+
+  if (term == window_term) {
+    abline(v = window_km, col = "firebrick", lty = 2, lwd = 2)
+  }
+}
+
+par(old_par)
+```
 
 
 
+```{r}
+window_start <- window_months[1]
+window_end <- window_months[2]
+
+dat_b |>
+  group_by(trt) |>
+  summarise(
+    `At risk at start` = sum(months >= window_start),
+    `Events in window` = sum(
+      event == 1 & months > window_start & months <= window_end
+    ),
+    `At risk at end` = sum(months >= window_end),
+    .groups = "drop"
+  ) |>
+  mutate(Treatment = if_else(trt == 1, "IDV", "No IDV"), .before = 1) |>
+  select(-trt) |>
+  kbl(
+    caption = sprintf(
+      "Risk sets and events in the marked window (%g to %g months)",
+      window_start, window_end
+    ),
+    booktabs = TRUE
+  ) |>
+  kable_styling(full_width = FALSE)
+```
 
 
 
+```{r}
+m1_tv <- coxph(
+  Surv(months, event) ~ trt + k100 + x + tt(trt),
+  data = dat_b,
+  ties = "efron",
+  tt = function(x, t, ...) x * log(t / 6)
+)
+
+report_months <- c(3, 6, 9)
+b <- coef(m1_tv)
+
+log_hr <- b["trt"] + b["tt(trt)"] * log(report_months / 6)
+
+# At month 6, the time-varying term is zero.
+se_6 <- sqrt(vcov(m1_tv)["trt", "trt"])
+ci_6 <- exp(b["trt"] + c(-1, 1) * qnorm(0.975) * se_6)
+
+hr_table <- tibble(
+  Month = report_months,
+  HR = exp(log_hr),
+  `95% CI` = c("", sprintf("%.3f to %.3f", ci_6[1], ci_6[2]), "")
+)
+
+hr_table |>
+  kbl(
+    caption = "Time-varying hazard ratios for IDV versus no IDV",
+    align = c("c", "r", "c"),
+    digits = 3,
+    booktabs = TRUE
+  ) |>
+  kable_styling(full_width = FALSE)
+```
 
 
 
+I would report a constant treatment HR as a summary of the observed
+follow-up. The Schoenfeld test gave limited evidence of a time-varying
+treatment effect (\(\chi^2_1 = 1.962\), \(p = 0.161\)). In the model
+with a treatment-by-log-time interaction, the estimated HRs for IDV
+versus no IDV were 0.483, 0.431, and 0.403 at 3, 6, and 9 months,
+respectively. The 6-month HR was 0.431 (95\% CI: 0.245 to 0.758).
+
+The strongest evidence against a constant treatment HR was the
+upturn in the smoothed treatment coefficient between months 6 and 9,
+which suggests that the benefit of IDV may have weakened in that
+window. The log-time model showed a modest decline in the HR, so the
+two analyses suggest different directions of change over this interval.
+The risk set shrank from 835 to 453 participants, and only 16 events
+occurred in that window (12 without IDV and 4 with IDV), making the
+late trend hard to estimate precisely.
+
+For baseline CD4, the Schoenfeld test gave some evidence against
+proportional hazards (\(\chi^2_1 = 3.998\), \(p = 0.046\)).
+The smoothed coefficient was more negative early in follow-up and
+became less negative later, suggesting that the association between
+higher baseline CD4 and lower hazard weakened over time.
+
+
+## part c
+
+
+```{r}
+dfbetas_m1 <- residuals(m1, type = "dfbetas")
+trt_col <- match("trt", names(coef(m1)))
+
+diagnostics <- tibble(
+  id = dat_b$id,
+  deviance = as.numeric(residuals(m1, type = "deviance")),
+  dfbetas_trt = as.numeric(dfbetas_m1[, trt_col])
+)
+
+# Sort by absolute value, then by ID to break exact ties.
+deviance_patient <- diagnostics |>
+  arrange(desc(abs(deviance)), id) |>
+  slice(1)
+
+dfbetas_patient <- diagnostics |>
+  arrange(desc(abs(dfbetas_trt)), id) |>
+  slice(1)
+
+tibble(
+  Diagnostic = c("Deviance residual", "Treatment DFBETAS"),
+  `Patient ID` = c(deviance_patient$id, dfbetas_patient$id),
+  Value = c(deviance_patient$deviance, dfbetas_patient$dfbetas_trt),
+  `Absolute value` = abs(Value)
+) |>
+  kbl(caption = "Patients selected by the two diagnostics",
+      digits = 4, booktabs = TRUE) |>
+  kable_styling(full_width = FALSE)
+```
+
+
+
+```{r}
+dat_drop <- dat_b |> filter(id != dfbetas_patient$id)
+m1_drop <- update(m1, data = dat_drop)
+
+log_hr_full <- unname(coef(m1)["trt"])
+log_hr_drop <- unname(coef(m1_drop)["trt"])
+
+tibble(
+  `Full M1 HR` = exp(log_hr_full),
+  `Refitted M1 HR` = exp(log_hr_drop),
+  `Change in log HR (refitted minus full)` = log_hr_drop - log_hr_full
+) |>
+  kbl(caption = "Treatment HR before and after omitting the DFBETAS-selected patient",
+      digits = 4, booktabs = TRUE) |>
+  kable_styling(full_width = FALSE)
+```
+
+
+
+```{r}
+# Evaluate each patient's fitted cumulative hazard at their observed time.
+baseline <- basehaz(m1, centered = FALSE)
+baseline_index <- findInterval(dat_b$months, baseline$time)
+h0 <- c(0, baseline$hazard)[baseline_index + 1L]
+
+lp <- predict(m1, newdata = dat_b, type = "lp", reference = "zero")
+cox_snell <- h0 * exp(lp)
+
+# Keep the original event indicator when fitting on the residual scale.
+residual_fit <- survfit(
+  Surv(cox_snell, dat_b$event) ~ 1,
+  stype = 2,
+  ctype = 1
+)
+
+plot_limit <- max(residual_fit$time, residual_fit$cumhaz)
+
+plot(
+  c(0, residual_fit$time),
+  c(0, residual_fit$cumhaz),
+  type = "s",
+  xlim = c(0, plot_limit),
+  ylim = c(0, plot_limit),
+  asp = 1,
+  xlab = "Cox--Snell residual",
+  ylab = "Nelson--Aalen cumulative hazard"
+)
+abline(a = 0, b = 1, col = "firebrick", lty = 2)
+```
+
+
+
+```{r}
+report_at <- 0.10
+hazard_index <- findInterval(report_at, residual_fit$time)
+
+tibble(
+  `Residual value` = report_at,
+  `Number at risk` = sum(cox_snell >= report_at),
+  `Nelson--Aalen cumulative hazard` =
+    c(0, residual_fit$cumhaz)[hazard_index + 1L]
+) |>
+  kbl(caption = "Cox--Snell residual check at 0.10",
+      digits = 4, booktabs = TRUE) |>
+  kable_styling(full_width = FALSE)
+```
+
+
+Patient 374 had the largest absolute deviance residual (3.5469),
+indicating the largest discrepancy between the observed follow-up
+and the fitted model. Patient 823 had the largest absolute DFBETAS
+for treatment (0.1528), indicating the greatest estimated influence
+on the treatment coefficient in standard-error units.
+
+After omitting patient 823, the adjusted HR for IDV versus no IDV
+changed from 0.5079 to 0.4912, a change of \(-0.0334\) on the log-HR
+scale. In both fits, the estimated hazard with IDV was about half
+that without IDV. I would retain both patients in the main analysis.
+Exclusion would require documented evidence of an uncorrectable
+data error or a violation of a prespecified eligibility criterion.
+
+The Cox--Snell plot checks overall fit by comparing the observed
+cumulative hazard on the residual scale with the 45-degree line.
+The curve tracked the line closely up to about 0.25. At a residual
+of 0.10, 359 participants were at risk and the Nelson--Aalen estimate
+was 0.0948, close to the expected 0.10. The curve rose above the line
+and then flattened in the upper tail, where fewer participants were
+at risk and individual events produced larger steps. The plot
+therefore gives the clearest evidence about overall fit at smaller
+residual values, while the deletion analysis addresses the sensitivity
+of the treatment HR to one influential patient.
+
+
+## part d
+
+```{r case-a-editor-table, echo=FALSE}
+editor_table <- survival_a |>
+  transmute(
+    Treatment = if_else(trt == 0, "No IDV", "IDV"),
+    Month,
+    Survival = sprintf("%.2f%%", 100 * KM)
+  ) |>
+  pivot_wider(
+    names_from = Month,
+    values_from = Survival,
+    names_prefix = "Month "
+  ) |>
+  mutate(`Month 12` = "Unavailable")
+
+editor_table |>
+  kbl(
+    caption = paste(
+      "Estimated probability of being alive and free of an",
+      "AIDS-defining diagnosis in Case A"
+    ),
+    align = c("l", "r", "r", "r"),
+    booktabs = TRUE
+  ) |>
+  kable_styling(full_width = FALSE)
+```
+
+
+Among ACTG 320 participants with baseline CD4 counts below 50 and
+Karnofsky scores below 100, the estimated probability of being alive
+and free of an AIDS-defining diagnosis at six months was 89.22\%
+with IDV and 79.46\% without IDV. At nine months, the corresponding
+estimates were 86.56\% and 73.90\%, a difference of 12.66 percentage
+points in favor of IDV. I would report these Kaplan--Meier estimates
+through nine months and mark the one-year estimates as unavailable
+because follow-up in both groups ended before 12 months. In the
+full trial analysis, removing the patient who most influenced the
+treatment estimate changed the hazard ratio only slightly, from
+0.508 to 0.491. I would therefore retain the full-trial hazard ratio
+as a summary and report the subgroup's event-free probabilities
+alongside it.
+
+
+AI Usage: I used ChatGPT 6.2 medium created by OpenAI. It helped me with creating tables using `kableExtra`, and organising latex codes. 
+
+
+Question: About repeating the 12.66-percentage-point difference. How precise is that estimate, given how many people were still being followed at nine months?
+
+I would change the sentence into: 
+At nine months, an estimated 87\% of participants assigned to IDV
+and 74\% of those assigned to no IDV were alive and free of an
+AIDS-defining diagnosis, a difference of about 13 percentage points.
+
+```{r}
+sessionInfo()
+```
 
 
 
